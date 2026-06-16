@@ -1,0 +1,13 @@
+target("test_main")
+    set_kind("binary")
+    set_languages("cxx11")
+    add_deps("wf_postgres")
+    add_packages("workflow", "openssl")
+    add_files("test_main.cc")
+
+target("test_prepare")
+    set_kind("binary")
+    set_languages("cxx11")
+    add_deps("wf_postgres")
+    add_packages("workflow", "openssl")
+    add_files("test_prepare.cc")

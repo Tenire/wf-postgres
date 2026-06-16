@@ -1,0 +1,7 @@
+build
+.vscode
+.agent
+.opencode
+memory-bank
+.xmake
+.cache
