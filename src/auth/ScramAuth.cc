@@ -5,6 +5,7 @@
 #include <openssl/rand.h>
 #include <string.h>
 
+namespace wfpg {
 namespace protocol {
 
 static std::string base64_encode(const unsigned char *buffer, size_t length) {
@@ -154,3 +155,4 @@ bool ScramAuth::verify_server_signature(const std::string& server_final_message)
 }
 
 } // namespace protocol
+} // namespace wfpg

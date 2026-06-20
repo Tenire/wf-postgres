@@ -1,0 +1,27 @@
+#ifndef _WFPOSTGRESERROR_H_
+#define _WFPOSTGRESERROR_H_
+
+namespace wfpg {
+
+enum {
+    /*
+      PostgreSQL plugin task errors.
+      See workflow/WFTaskError.h for WFT_STATE_TASK_ERROR.
+      This external plugin uses the private 14000 range to avoid Workflow built-in ranges:
+      common 1000, HTTP 2000, Redis 3000, MySQL 4000, Kafka 5000, Consul 6000.
+    */
+    WFT_ERR_POSTGRES_BASE = 14000,
+
+    WFT_ERR_POSTGRES_SSL_NOT_SUPPORTED = WFT_ERR_POSTGRES_BASE + 1,
+    WFT_ERR_POSTGRES_SSL_INIT_FAILED = WFT_ERR_POSTGRES_BASE + 2,
+    WFT_ERR_POSTGRES_AUTH_FAILED = WFT_ERR_POSTGRES_BASE + 3,
+    WFT_ERR_POSTGRES_UNSUPPORTED_AUTH = WFT_ERR_POSTGRES_BASE + 4,
+    WFT_ERR_POSTGRES_PROTOCOL_NOT_SUPPORTED = WFT_ERR_POSTGRES_BASE + 5,
+    WFT_ERR_POSTGRES_PROTOCOL_ERROR = WFT_ERR_POSTGRES_BASE + 6,
+    WFT_ERR_POSTGRES_BAD_RESPONSE = WFT_ERR_POSTGRES_BASE + 7,
+    WFT_ERR_POSTGRES_SSL_CERT_FAILED = WFT_ERR_POSTGRES_BASE + 8,
+};
+
+} // namespace wfpg
+
+#endif

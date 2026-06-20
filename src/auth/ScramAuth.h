@@ -3,6 +3,7 @@
 
 #include <string>
 
+namespace wfpg {
 namespace protocol {
 
 class ScramAuth {
@@ -23,5 +24,6 @@ private:
 };
 
 } // namespace protocol
+} // namespace wfpg
 
 #endif // _WF_POSTGRES_SCRAM_AUTH_H_

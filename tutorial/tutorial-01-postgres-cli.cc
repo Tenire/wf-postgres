@@ -4,7 +4,8 @@
 #include "PostgresTask.h"
 #include "PostgresResult.h"
 
-using namespace protocol;
+using namespace wfpg;
+using namespace wfpg::protocol;
 
 int main(int argc, char *argv[])
 {
@@ -42,30 +43,30 @@ int main(int argc, char *argv[])
                 std::cout << "Task success! Backend has completed the query." << std::endl;
                 std::cout << "Response buffer size: " << resp->get_buf_size() << std::endl;
 
-                protocol::PostgresResultCursor cursor(resp);
+                PostgresResultCursor cursor(resp);
                 const auto& fields = cursor.get_fields();
                 for (const auto& field : fields) {
                     std::cout << field.name << "\t";
                 }
                 std::cout << "\n----------------------------------------\n";
 
-                std::vector<protocol::PostgresCell> row;
+                std::vector<PostgresCell> row;
                 while (cursor.fetch_row(row)) {
                     for (const auto& cell : row) {
-                        if (cell.is_null) {
+                        if (cell.is_null()) {
                             std::cout << "NULL\t";
                         } else {
-                            if (cell.field->type_oid == PostgresOid::INT4) {
+                            if (cell.field()->type_oid == PostgresOid::INT4) {
                                 std::cout << cell.as_int() << "(int)\t";
-                            } else if (cell.field->type_oid == PostgresOid::UUID) {
+                            } else if (cell.field()->type_oid == PostgresOid::UUID) {
                                 std::cout << cell.as_uuid_string() << "(uuid)\t";
-                            } else if (cell.field->type_oid == PostgresOid::FLOAT4) {
+                            } else if (cell.field() && cell.field()->type_oid == PostgresOid::FLOAT4) {
                                 std::cout << cell.as_float() << "(float4)\t";
-                            } else if (cell.field->type_oid == PostgresOid::FLOAT8) {
+                            } else if (cell.field() && cell.field()->type_oid == PostgresOid::FLOAT8) {
                                 std::cout << cell.as_double() << "(float8)\t";
-                            } else if (cell.field->type_oid == PostgresOid::TIMESTAMP || cell.field->type_oid == PostgresOid::TIMESTAMPTZ) {
+                            } else if (cell.field() && (cell.field()->type_oid == PostgresOid::TIMESTAMP || cell.field()->type_oid == PostgresOid::TIMESTAMPTZ)) {
                                 std::cout << cell.as_datetime_string() << "(ts)\t";
-                            } else if (cell.field->type_oid == PostgresOid::DATE) {
+                            } else if (cell.field() && cell.field()->type_oid == PostgresOid::DATE) {
                                 std::cout << cell.as_date_string() << "(date)\t";
                             } else {
                                 std::cout << cell.as_string() << "\t";

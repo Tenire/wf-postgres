@@ -1,0 +1,8 @@
+leak:RAND_bytes
+leak:RAND_bytes_ex
+leak:RAND_get0_primary
+leak:RAND_get0_public
+leak:EVP_RAND_fetch
+leak:CRYPTO_strndup
+leak:CRYPTO_strdup
+leak:CRYPTO_zalloc

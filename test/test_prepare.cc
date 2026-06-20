@@ -5,7 +5,8 @@
 #include "WFPostgresConnection.h"
 #include "PostgresResult.h"
 
-using namespace protocol;
+using namespace wfpg;
+using namespace wfpg::protocol;
 
 int test_prepare_integration(const std::string& url) {
     WFPostgresConnection conn(1);

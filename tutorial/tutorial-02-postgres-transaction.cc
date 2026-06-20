@@ -3,7 +3,8 @@
 #include "workflow/WFFacilities.h"
 #include "WFPostgresConnection.h"
 
-using namespace protocol;
+using namespace wfpg;
+using namespace wfpg::protocol;
 
 int main(int argc, char *argv[])
 {
