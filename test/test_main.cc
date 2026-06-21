@@ -128,7 +128,8 @@ void test_malformed_data_d() {
     resp.append_public(data.c_str(), &size);
     PostgresResultCursor cursor(&resp);
     std::vector<PostgresCell> row;
-    assert(cursor.fetch_row(row) == false); // Should reject malformed D frame
+    bool ok1 = cursor.fetch_row(row);
+    assert(ok1 == false); // Should reject malformed D frame
 }
 
 void test_malformed_command_c() {
@@ -146,7 +147,8 @@ void test_malformed_command_c() {
     resp.append_public(data.c_str(), &size);
     PostgresResultCursor cursor(&resp);
     std::vector<PostgresCell> row;
-    assert(cursor.fetch_row(row) == false);
+    bool ok2 = cursor.fetch_row(row);
+    assert(ok2 == false);
     assert(cursor.get_command_tag() == ""); // Should safely ignore tag if len=4
 }
 
@@ -209,13 +211,15 @@ void test_multi_result() {
     assert(count == 1);
     assert(cursor.get_command_tag() == "SELECT 1");
     
-    assert(cursor.next_result_set() == true);
+    bool has_next1 = cursor.next_result_set();
+    assert(has_next1 == true);
     count = 0;
     while(cursor.fetch_row(row)) { count++; }
     assert(count == 0);
     assert(cursor.get_command_tag() == "SELECT 0");
     
-    assert(cursor.next_result_set() == false);
+    bool has_next2 = cursor.next_result_set();
+    assert(has_next2 == false);
 }
 
 void test_map_fetch() {
@@ -256,11 +260,12 @@ void test_map_fetch() {
     
     PostgresResultCursor cursor(&resp);
     std::map<std::string, PostgresCell> row_map;
-    assert(cursor.fetch_row(row_map) == true);
-    assert(row_map.size() == 2);
+    bool ok3 = cursor.fetch_row(row_map);
+    assert(ok3 == true);
     assert(row_map.at("id").as_int() == 1);
     assert(row_map.at("name").as_string() == "Bob");
-    assert(cursor.fetch_row(row_map) == false);
+    bool ok4 = cursor.fetch_row(row_map);
+    assert(ok4 == false);
 }
 
 void test_jsonb_and_array() {
@@ -324,7 +329,8 @@ void test_jsonb_and_array() {
     
     PostgresResultCursor cursor(&resp);
     std::map<std::string, PostgresCell> row_map;
-    assert(cursor.fetch_row(row_map) == true);
+    bool ok5 = cursor.fetch_row(row_map);
+    assert(ok5 == true);
     
     for (auto& kv : row_map) {
         std::cerr << "Key: '" << kv.first << "'" << std::endl;

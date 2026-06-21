@@ -20,6 +20,9 @@ int main(int argc, char *argv[])
     URIParser::parse(url, uri);
 
     bool is_direct = (argc > 2 && std::string(argv[2]) == "direct");
+    bool is_connection = (argc > 2 && std::string(argv[2]) == "connection");
+    bool is_connection_disconnect = (argc > 2 && std::string(argv[2]) == "connection_disconnect");
+    
     WFPostgresConnection *conn = nullptr;
     WFPostgresTask *task = nullptr;
 
@@ -58,6 +61,46 @@ int main(int argc, char *argv[])
     if (is_direct) {
         task = WFPostgresTaskFactory::create_postgres_task(url, 0, callback);
         task->get_req()->set_query("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();");
+    } else if (is_connection) {
+        SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+        if (!ctx) return 1;
+        SSL_CTX_load_verify_locations(ctx, "/tmp/opencode/wf-pg-ssl/server.crt", NULL);
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+        
+        conn = new WFPostgresConnection(1);
+        int ret = conn->init(url, ctx);
+        if (ret != 0) {
+            std::cerr << "Connection init failed\n";
+            SSL_CTX_free(ctx);
+            return 1;
+        }
+        task = conn->create_query_task("SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid();", [callback, ctx](WFPostgresTask *t) {
+            callback(t);
+            SSL_CTX_free(ctx);
+        });
+    } else if (is_connection_disconnect) {
+        SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+        if (!ctx) return 1;
+        SSL_CTX_load_verify_locations(ctx, "/tmp/opencode/wf-pg-ssl/server.crt", NULL);
+        SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+        
+        conn = new WFPostgresConnection(1);
+        int ret = conn->init(url, ctx);
+        if (ret != 0) {
+            std::cerr << "Connection init failed\n";
+            SSL_CTX_free(ctx);
+            return 1;
+        }
+        task = conn->create_disconnect_task([&wait_group, &exit_code, ctx](WFPostgresTask *t) {
+            if (t->get_state() != WFT_STATE_SUCCESS) {
+                std::cerr << "Disconnect SSL failed: state=" << t->get_state() << " error=" << t->get_error() << "\n";
+                exit_code = 1;
+            } else {
+                std::cout << "Disconnect SSL passed\n";
+            }
+            SSL_CTX_free(ctx);
+            wait_group.done();
+        });
     } else {
         conn = new WFPostgresConnection(1);
         int ret = conn->init(url);

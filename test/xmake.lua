@@ -145,6 +145,16 @@ target("test_types")
         add_runenvs("LSAN_OPTIONS", "suppressions=" .. os.projectdir() .. "/test/asan.supp")
     end
 
+target("test_disconnect_factory")
+    set_kind("binary")
+    set_languages("cxx11")
+    add_deps("wf_postgres")
+    add_packages("workflow", "openssl")
+    add_files("test_disconnect_factory.cc")
+    if is_plat("linux") and is_mode("asan") then
+        add_runenvs("LSAN_OPTIONS", "suppressions=" .. os.projectdir() .. "/test/asan.supp")
+    end
+
 target("test_notice")
     set_kind("binary")
     set_languages("cxx11")

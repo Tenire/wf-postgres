@@ -134,10 +134,9 @@ WFPostgresTask *WFPostgresConnection::create_query_task(const std::string& query
 
 WFPostgresTask *WFPostgresConnection::create_disconnect_task(postgres_callback_t callback)
 {
-    WFPostgresTask *task = this->create_query_task("", std::move(callback));
-    protocol::PostgresInternalAccess::set_is_disconnect(task->get_req(), true);
+    WFPostgresTask *task =
+        WFPostgresTaskFactory::create_disconnect_task(this->uri, 0, std::move(callback));
     this->set_ssl_ctx(task);
-    task->set_keep_alive(0);
     return task;
 }
 

@@ -1,6 +1,8 @@
 #include "PostgresTask.h"
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
+#include <openssl/err.h>
+#include <errno.h>
 #include "workflow/RouteManager.h"
 #include "PostgresInternal.h"
 #include "workflow/WFTaskFactory.h"
@@ -13,6 +15,9 @@
 #include "workflow/WFGlobal.h"
 #include <algorithm>
 #include <map>
+
+#define POSTGRES_KEEPALIVE_DEFAULT     (30 * 1000)
+#define POSTGRES_KEEPALIVE_TRANSACTION (3600 * 1000)
 
 namespace wfpg {
 namespace protocol {
@@ -418,7 +423,6 @@ CommMessageOut *ComplexPostgresTask::message_out()
 {
     PostgresRequest *req;
     is_user_request_ = false;
-
     auto *wf_conn = this->WFComplexClientTask::get_connection();
     auto *conn = (PostgresConnection *)(wf_conn ? wf_conn->get_context() : nullptr);
 
@@ -520,6 +524,14 @@ int ComplexPostgresTask::keep_alive_timeout()
 {
     if (this->state != WFT_STATE_SUCCESS)
         return 0;
+
+    if (!is_user_request_) {
+        return POSTGRES_KEEPALIVE_DEFAULT; // Keep connection alive during authentication
+    }
+
+    if (is_user_request_ && (this->get_req()->is_disconnect() || this->get_req()->is_cancel())) {
+        return 0;
+    }
 
     auto *resp = (protocol::PostgresResponse *)this->get_resp();
     char tx_state = resp->get_transaction_state();
@@ -659,7 +671,10 @@ WFPostgresTask *WFPostgresTaskFactory::create_postgres_task(const std::string& u
     ::ParsedURI uri;
     ::URIParser::parse(url, uri);
     task->init(std::move(uri));
-    task->set_keep_alive(30 * 1000);
+    if (task->is_fixed_conn())
+        task->set_keep_alive(POSTGRES_KEEPALIVE_TRANSACTION);
+    else
+        task->set_keep_alive(POSTGRES_KEEPALIVE_DEFAULT);
     return task;
 }
 
@@ -669,7 +684,10 @@ WFPostgresTask *WFPostgresTaskFactory::create_postgres_task(const ::ParsedURI& u
 {
     auto *task = new protocol::ComplexPostgresTask(retry_max, std::move(callback));
     task->init(uri);
-    task->set_keep_alive(30 * 1000);
+    if (task->is_fixed_conn())
+        task->set_keep_alive(POSTGRES_KEEPALIVE_TRANSACTION);
+    else
+        task->set_keep_alive(POSTGRES_KEEPALIVE_DEFAULT);
     return task;
 }
 
@@ -687,6 +705,28 @@ WFPostgresTask *WFPostgresTaskFactory::create_cancel_task(const std::string& url
 
     WFPostgresTask *task = create_postgres_task(modified_url, retry_max, std::move(callback));
     protocol::PostgresInternalAccess::set_cancel(task->get_req(), pid, secret_data);
+    task->set_keep_alive(0);
+    return task;
+}
+
+WFPostgresTask *WFPostgresTaskFactory::create_disconnect_task(
+    const std::string& url,
+    int retry_max,
+    postgres_callback_t callback)
+{
+    WFPostgresTask *task = create_postgres_task(url, retry_max, std::move(callback));
+    protocol::PostgresInternalAccess::set_is_disconnect(task->get_req(), true);
+    task->set_keep_alive(0);
+    return task;
+}
+
+WFPostgresTask *WFPostgresTaskFactory::create_disconnect_task(
+    const ParsedURI& uri,
+    int retry_max,
+    postgres_callback_t callback)
+{
+    WFPostgresTask *task = create_postgres_task(uri, retry_max, std::move(callback));
+    protocol::PostgresInternalAccess::set_is_disconnect(task->get_req(), true);
     task->set_keep_alive(0);
     return task;
 }
