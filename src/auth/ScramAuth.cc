@@ -1,3 +1,13 @@
+/*
+  SCRAM-SHA-256 Authentication implementation.
+  References:
+    - RFC 5802: Salted Challenge Response Authentication Mechanism (SCRAM)
+                SASL and GSS-API Mechanisms
+    - RFC 7677: SCRAM-SHA-256 and SCRAM-SHA-256-PLUS SASL Mechanisms
+    - PostgreSQL Protocol Specification: SASL Authentication
+      https://www.postgresql.org/docs/current/sasl-authentication.html
+*/
+
 #include "ScramAuth.h"
 #include <openssl/sha.h>
 #include <openssl/hmac.h>

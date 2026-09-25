@@ -4,7 +4,7 @@
 #include <openssl/err.h>
 #include <errno.h>
 #include "workflow/RouteManager.h"
-#include "PostgresInternal.h"
+#include "PostgresSSLMessage.h"
 #include "workflow/WFTaskFactory.h"
 #include "workflow/URIParser.h"
 #include "workflow/StringUtil.h"
@@ -231,7 +231,7 @@ static bool handle_startup_auth_completion(
 {
     if (startup_resp->is_error()) {
         state = WFT_STATE_TASK_ERROR;
-        int internal_err = PostgresInternalAccess::get_internal_error(startup_resp);
+        int internal_err = startup_resp->get_internal_error();
         if (internal_err != 0) {
             error = internal_err;
         } else {
@@ -244,8 +244,8 @@ static bool handle_startup_auth_completion(
         }
         return true;
     }
-    if (PostgresInternalAccess::get_negotiated_protocol_version(startup_resp) != 0 &&
-        (PostgresInternalAccess::get_negotiated_protocol_version(startup_resp) >> 16) != 3) {
+    if (startup_resp->get_negotiated_protocol_version() != 0 &&
+        (startup_resp->get_negotiated_protocol_version() >> 16) != 3) {
         state = WFT_STATE_TASK_ERROR;
         error = WFT_ERR_POSTGRES_PROTOCOL_NOT_SUPPORTED; 
         return true;
@@ -257,9 +257,9 @@ static bool handle_startup_auth_completion(
         });
         conn = my_conn;
     }
-    conn->backend_pid = PostgresInternalAccess::get_backend_pid(startup_resp);
-    conn->backend_secret = PostgresInternalAccess::get_backend_secret_key(startup_resp);
-    conn->backend_secret_data = PostgresInternalAccess::get_backend_secret_data(startup_resp);
+    conn->backend_pid = startup_resp->get_backend_pid();
+    conn->backend_secret = startup_resp->get_backend_secret_key();
+    conn->backend_secret_data = startup_resp->get_backend_secret_data();
     conn->state = 3; // Ready
     is_user_request = true;
     return false;
@@ -302,8 +302,8 @@ static void cleanup_fixed_conn_target(
 static bool validate_request(PostgresConnection* conn, PostgresRequest* req, int& error_code) {
     if (!conn) return true;
 
-    bool is_copy_task = PostgresInternalAccess::is_copy(req) || PostgresInternalAccess::is_copy_done(req) || PostgresInternalAccess::is_copy_fail(req);
-    bool is_disconnect = PostgresInternalAccess::is_disconnect(req);
+    bool is_copy_task = req->is_copy() || req->is_copy_done() || req->is_copy_fail();
+    bool is_disconnect = req->is_disconnect();
 
     if (conn->protocol_state == PG_PROTOCOL_BROKEN) {
         error_code = EBADF;
@@ -323,7 +323,7 @@ static bool validate_request(PostgresConnection* conn, PostgresRequest* req, int
             error_code = EPROTO;
             return false;
         }
-        if (PostgresInternalAccess::is_wait_notification(req)) {
+        if (req->is_wait_notification()) {
             conn->protocol_state = PG_PROTOCOL_NOTIFY_WAIT;
         }
     }
@@ -334,17 +334,17 @@ static void update_after_response(PostgresConnection* conn, PostgresRequest* req
     if (!conn) return;
 
     if (resp) {
-        PostgresInternalAccess::set_backend_pid(resp, conn->backend_pid);
-        PostgresInternalAccess::set_backend_secret_key(resp, conn->backend_secret);
-        PostgresInternalAccess::set_backend_secret_data(resp, conn->backend_secret_data);
+        resp->set_backend_pid(conn->backend_pid);
+        resp->set_backend_secret_key(conn->backend_secret);
+        resp->set_backend_secret_data(conn->backend_secret_data);
 
         // If it's a network error, or a protocol error (not just a SQL error response), break the connection
         if (task_state != WFT_STATE_SUCCESS && !(task_state == WFT_STATE_TASK_ERROR && resp->is_error())) {
             conn->protocol_state = PG_PROTOCOL_BROKEN;
         } else {
-            if (PostgresInternalAccess::is_copy_in(resp)) {
+            if (resp->is_copy_in()) {
                 conn->protocol_state = PG_PROTOCOL_COPY_IN;
-            } else if (req && PostgresInternalAccess::is_wait_notification(req)) {
+            } else if (req && req->is_wait_notification()) {
                 conn->protocol_state = PG_PROTOCOL_READY;
             } else if (resp->get_transaction_state() == 'I' ||
                        resp->get_transaction_state() == 'T' ||
@@ -395,6 +395,25 @@ public:
         owns_ssl_ctx_ = false;
     }
     SSL_CTX *get_my_ssl_ctx() const { return my_ssl_ctx_; }
+    const ParsedURI *get_current_uri() const { return &this->uri_; }
+    bool get_backend_credentials(int32_t *pid, std::string *secret) const {
+        auto *wf_conn = this->WFComplexClientTask::get_connection();
+        if (wf_conn) {
+            auto *conn = (PostgresConnection *)wf_conn->get_context();
+            if (conn && conn->backend_pid != 0) {
+                *pid = conn->backend_pid;
+                *secret = conn->backend_secret_data;
+                return true;
+            }
+        }
+        auto *resp = (const PostgresResponse *)this->get_resp();
+        if (resp && resp->get_backend_pid() != 0) {
+            *pid = resp->get_backend_pid();
+            *secret = resp->get_backend_secret_data();
+            return true;
+        }
+        return false;
+    }
 
 private:
     std::string user_;
@@ -439,7 +458,7 @@ CommMessageOut *ComplexPostgresTask::message_out()
                 startup_req_->set_is_startup(true);
                 startup_req_->set_protocol_version(target_protocol_version_);
                 startup_req_->set_auth(user_, db_, pass_);
-                PostgresInternalAccess::set_startup_params(startup_req_, startup_params_);
+                startup_req_->set_startup_params(startup_params_);
             }
             return startup_req_;
         }
@@ -454,7 +473,7 @@ CommMessageOut *ComplexPostgresTask::message_out()
             startup_req_->set_is_startup(true);
             startup_req_->set_protocol_version(target_protocol_version_);
             startup_req_->set_auth(user_, db_, pass_);
-            PostgresInternalAccess::set_startup_params(startup_req_, startup_params_);
+            startup_req_->set_startup_params(startup_params_);
         }
         return wrap_ssl(conn, startup_req_);
     }
@@ -536,7 +555,11 @@ int ComplexPostgresTask::keep_alive_timeout()
     auto *resp = (protocol::PostgresResponse *)this->get_resp();
     char tx_state = resp->get_transaction_state();
 
-    if (tx_state == 'T' || tx_state == 'E') {
+    if (tx_state == 'E') {
+        return 0;
+    }
+
+    if (tx_state == 'T') {
         if (!this->is_fixed_conn()) {
             return 0;
         }
@@ -637,7 +660,7 @@ void ComplexPostgresTask::handle(int state, int error)
     }
 
     if (state == WFT_STATE_SUCCESS && this->get_resp()->is_error()) {
-        int internal_err = PostgresInternalAccess::get_internal_error(this->get_resp());
+        int internal_err = this->get_resp()->get_internal_error();
         if (internal_err != 0) {
             state = WFT_STATE_TASK_ERROR;
             error = internal_err;
@@ -691,31 +714,41 @@ WFPostgresTask *WFPostgresTaskFactory::create_postgres_task(const ::ParsedURI& u
     return task;
 }
 
-WFPostgresTask *WFPostgresTaskFactory::create_cancel_task(const std::string& url,
-                                                                    int32_t pid,
-                                                                    const std::string& secret_data,
-                                                                    int retry_max,
-                                                                    postgres_callback_t callback)
+WFPostgresTask *WFPostgresTaskFactory::create_cancel_task(WFPostgresTask *query_task,
+                                                          postgres_callback_t callback)
 {
-    std::string modified_url = url;
-    if (modified_url.find('?') == std::string::npos)
-        modified_url += "?cancel=1";
-    else
-        modified_url += "&cancel=1";
+    if (!query_task) return nullptr;
+    auto *complex_task = (protocol::ComplexPostgresTask *)query_task;
+    int32_t pid = 0;
+    std::string secret;
+    complex_task->get_backend_credentials(&pid, &secret);
+    const ParsedURI *uri = complex_task->get_current_uri();
+    if (!uri) return nullptr;
 
-    WFPostgresTask *task = create_postgres_task(modified_url, retry_max, std::move(callback));
-    protocol::PostgresInternalAccess::set_cancel(task->get_req(), pid, secret_data);
-    task->set_keep_alive(0);
-    return task;
+    return create_cancel_task(*uri, pid, secret, 0, std::move(callback));
 }
 
-WFPostgresTask *WFPostgresTaskFactory::create_disconnect_task(
-    const std::string& url,
-    int retry_max,
-    postgres_callback_t callback)
+WFPostgresTask *WFPostgresTaskFactory::create_cancel_task(const ParsedURI& uri,
+                                                          int32_t pid,
+                                                          const std::string& secret_data,
+                                                          int retry_max,
+                                                          postgres_callback_t callback)
 {
-    WFPostgresTask *task = create_postgres_task(url, retry_max, std::move(callback));
-    protocol::PostgresInternalAccess::set_is_disconnect(task->get_req(), true);
+    ParsedURI cancel_uri;
+    cancel_uri = uri;
+    std::string query;
+    if (uri.query) {
+        query = uri.query;
+        query += "&cancel=1";
+    } else {
+        query = "cancel=1";
+    }
+    cancel_uri.query = strdup(query.c_str());
+
+    WFPostgresTask *task = create_postgres_task(cancel_uri, retry_max, std::move(callback));
+    if (cancel_uri.query)
+        free(cancel_uri.query);
+    task->get_req()->set_cancel(pid, secret_data);
     task->set_keep_alive(0);
     return task;
 }
@@ -726,7 +759,7 @@ WFPostgresTask *WFPostgresTaskFactory::create_disconnect_task(
     postgres_callback_t callback)
 {
     WFPostgresTask *task = create_postgres_task(uri, retry_max, std::move(callback));
-    protocol::PostgresInternalAccess::set_is_disconnect(task->get_req(), true);
+    task->get_req()->set_is_disconnect(true);
     task->set_keep_alive(0);
     return task;
 }

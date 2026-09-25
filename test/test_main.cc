@@ -4,7 +4,7 @@
 #include <cassert>
 #include "PostgresResult.h"
 #include "PostgresResponse.h"
-#include "../src/protocol/PostgresInternal.h"
+
 
 using namespace wfpg;
 using namespace wfpg::protocol;
@@ -85,13 +85,13 @@ void test_parameter_and_backend_key() {
     
     // Verify results
     assert(resp.get_parameters().at("client_encoding") == "UTF8");
-    assert(PostgresInternalAccess::get_backend_pid(&resp) == 1234);
-    assert(PostgresInternalAccess::get_backend_secret_key(&resp) == 5678);
+    assert(resp.get_backend_pid() == 1234);
+    assert(resp.get_backend_secret_key() == 5678);
 }
 
 void test_startup_error_no_z() {
     TestResponse resp;
-    PostgresInternalAccess::set_is_startup(&resp, true);
+    resp.set_is_startup(true);
     std::string data = make_frame('E', "SFATAL\0MInvalid password\0\0");
     size_t size = data.size();
     int ret = resp.append_public(data.c_str(), &size);

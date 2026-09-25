@@ -22,6 +22,9 @@ public:
                          backend_pid_(0), backend_secret_key_(0), transaction_state_('I'),
                          notify_mode_(false), negotiated_protocol_version_(0), cursor_(0), internal_error_(0) {}
     virtual ~PostgresResponse();
+    PostgresResponse(PostgresResponse&& other) noexcept;
+    PostgresResponse& operator=(PostgresResponse&& other) noexcept;
+
 
     // Public User API
     bool is_error() const { return is_error_; }
@@ -42,9 +45,30 @@ public:
 
     int32_t get_backend_pid() const { return backend_pid_; }
     const std::string& get_backend_secret_data() const { return backend_secret_data_; }
+    int32_t get_backend_secret_key() const { return backend_secret_key_; }
+    void set_backend_pid(int32_t pid) { backend_pid_ = pid; }
+    void set_backend_secret_key(int32_t secret) { backend_secret_key_ = secret; }
+    void set_backend_secret_data(const std::string& data) { backend_secret_data_ = data; }
 
     const void *get_buf() const { return buf_.c_str(); }
     size_t get_buf_size() const { return buf_.size(); }
+
+    bool is_copy_in() const { return is_copy_in_; }
+    bool is_copy_out() const { return is_copy_out_; }
+
+    uint32_t get_negotiated_protocol_version() const { return negotiated_protocol_version_; }
+    const std::vector<std::string>& get_negotiated_unsupported_options() const { return negotiated_unsupported_options_; }
+
+    void set_notify_mode(bool m) { notify_mode_ = m; }
+    bool get_notify_mode() const { return notify_mode_; }
+
+    void set_internal_error(int error) { internal_error_ = error; }
+    int get_internal_error() const { return internal_error_; }
+
+    void set_auth(const std::string& user, const std::string& pass);
+    void set_is_startup(bool v) { is_startup_ = v; }
+    int append_data(const void *buf, size_t *size) { return this->append(buf, size); }
+
 
 protected:
     virtual int append(const void *buf, size_t *size) override;
@@ -53,7 +77,6 @@ private:
     friend class ComplexPostgresTask;
     friend class wfpg::WFPostgresConnection;
     friend class PostgresResultCursor;
-    friend struct PostgresInternalAccess;
 
     void set_error_fatal(const std::string& message) {
         is_error_ = true;
@@ -79,23 +102,8 @@ private:
         parameters_.clear();
     }
 
-    void set_auth(const std::string& user, const std::string& pass);
-    void set_is_startup(bool v) { is_startup_ = v; }
     bool is_startup_error() const { return is_error_ && cursor_ > 0; }
 
-    bool is_copy_in() const { return is_copy_in_; }
-    bool is_copy_out() const { return is_copy_out_; }
-
-    void set_backend_pid(int32_t pid) { backend_pid_ = pid; }
-    int32_t get_backend_secret_key() const { return backend_secret_key_; }
-    void set_backend_secret_key(int32_t secret) { backend_secret_key_ = secret; }
-    void set_backend_secret_data(const std::string& data) { backend_secret_data_ = data; }
-    
-    uint32_t get_negotiated_protocol_version() const { return negotiated_protocol_version_; }
-    const std::vector<std::string>& get_negotiated_unsupported_options() const { return negotiated_unsupported_options_; }
-    
-    void set_notify_mode(bool m) { notify_mode_ = m; }
-    bool get_notify_mode() const { return notify_mode_; }
 
     std::string buf_;
     size_t cursor_;
@@ -103,8 +111,7 @@ private:
     std::string pass_;
     PostgresAuth* auth_ = nullptr;
     
-    void set_internal_error(int error) { internal_error_ = error; }
-    int get_internal_error() const { return internal_error_; }
+
 
     bool is_error_;
     bool is_startup_ = false;

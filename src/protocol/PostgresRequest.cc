@@ -1,9 +1,8 @@
 #include "PostgresRequest.h"
 #include "PostgresWireUtil.h"
-#include "PostgresInternal.h"
 #include <string.h>
 #include <arpa/inet.h>
-#include "PostgresWireUtil.h"
+#include "PostgresSSLMessage.h"
 
 namespace wfpg {
 namespace protocol {

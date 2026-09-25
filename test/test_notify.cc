@@ -1,6 +1,5 @@
 #include "workflow/WFFacilities.h"
 #include "WFPostgresConnection.h"
-#include "../src/protocol/PostgresInternal.h"
 #include <iostream>
 #include <atomic>
 
@@ -56,8 +55,8 @@ int main(int argc, char *argv[])
             wait_group.done();
         });
         
-        PostgresInternalAccess::set_wait_notification(wait_task->get_req(), true);
-        PostgresInternalAccess::set_notify_mode(wait_task->get_resp(), true);
+        wait_task->get_req()->set_wait_notification(true);
+        wait_task->get_resp()->set_notify_mode(true);
         wait_task->start();
 
         // 3. Fire a timer to send NOTIFY from a DIFFERENT connection

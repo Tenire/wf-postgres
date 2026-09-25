@@ -1,5 +1,4 @@
 #include "workflow/WFFacilities.h"
-#include "../src/protocol/PostgresInternal.h"
 #include "WFPostgresConnection.h"
 #include "PostgresResult.h"
 #include <iostream>
@@ -51,7 +50,7 @@ void write_copy_data(WFPostgresConnection *conn, const std::vector<std::string>&
     for (const auto& d : data) {
         all_data += d;
     }
-    PostgresInternalAccess::set_copy_data(task->get_req(), all_data, true); // Send CopyDone
+    task->get_req()->set_copy_data(all_data, true); // Send CopyDone
     task->start();
 }
 

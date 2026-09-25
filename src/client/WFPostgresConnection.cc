@@ -6,8 +6,7 @@
 #include "workflow/URIParser.h"
 #include <openssl/x509v3.h>
 #include "WFPostgresConnection.h"
-#include "PostgresInternal.h"
-
+#include "PostgresSSLMessage.h"
 #include "workflow/StringUtil.h"
 #include "WFPostgresError.h"
 #include <algorithm>
@@ -126,9 +125,43 @@ int WFPostgresConnection::init(const std::string& url, SSL_CTX *ssl_ctx)
 WFPostgresTask *WFPostgresConnection::create_query_task(const std::string& query,
                                             postgres_callback_t callback)
 {
-    WFPostgresTask *task = WFPostgresTaskFactory::create_postgres_task(this->uri, 0, std::move(callback));
+    auto cb = [this, callback](WFPostgresTask *task) {
+        if (task && task->get_resp()) {
+            this->last_tx_state_ = task->get_resp()->get_transaction_state();
+            if (task->get_resp()->get_backend_pid() != 0) {
+                this->backend_pid_ = task->get_resp()->get_backend_pid();
+                this->backend_secret_data_ = task->get_resp()->get_backend_secret_data();
+            }
+        }
+        if (callback) {
+            callback(task);
+        }
+    };
+    WFPostgresTask *task = WFPostgresTaskFactory::create_postgres_task(this->uri, 0, std::move(cb));
     this->set_ssl_ctx(task);
     task->get_req()->set_query(query);
+    return task;
+}
+
+WFPostgresTask *WFPostgresConnection::create_query_task(const std::string& query,
+                                            const std::vector<protocol::PostgresParameter>& params,
+                                            postgres_callback_t callback)
+{
+    auto cb = [this, callback](WFPostgresTask *task) {
+        if (task && task->get_resp()) {
+            this->last_tx_state_ = task->get_resp()->get_transaction_state();
+            if (task->get_resp()->get_backend_pid() != 0) {
+                this->backend_pid_ = task->get_resp()->get_backend_pid();
+                this->backend_secret_data_ = task->get_resp()->get_backend_secret_data();
+            }
+        }
+        if (callback) {
+            callback(task);
+        }
+    };
+    WFPostgresTask *task = WFPostgresTaskFactory::create_postgres_task(this->uri, 0, std::move(cb));
+    this->set_ssl_ctx(task);
+    task->get_req()->set_query(query, params);
     return task;
 }
 
@@ -136,6 +169,14 @@ WFPostgresTask *WFPostgresConnection::create_disconnect_task(postgres_callback_t
 {
     WFPostgresTask *task =
         WFPostgresTaskFactory::create_disconnect_task(this->uri, 0, std::move(callback));
+    this->set_ssl_ctx(task);
+    return task;
+}
+
+WFPostgresTask *WFPostgresConnection::create_cancel_task(postgres_callback_t callback)
+{
+    WFPostgresTask *task = WFPostgresTaskFactory::create_cancel_task(
+        this->uri, this->backend_pid_, this->backend_secret_data_, 0, std::move(callback));
     this->set_ssl_ctx(task);
     return task;
 }

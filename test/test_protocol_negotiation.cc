@@ -5,9 +5,8 @@
 #include "workflow/StringUtil.h"
 #include "workflow/WFTaskFactory.h"
 #include "workflow/WFFacilities.h"
-
-#include "../src/protocol/PostgresInternal.h"
 #include <atomic>
+#include "WFPostgresClient.h"
 
 using namespace wfpg;
 using namespace wfpg::protocol;
@@ -102,8 +101,8 @@ int main(int argc, char *argv[]) {
             } else {
                 auto *resp = task->get_resp();
                 std::cout << "plain_32 test completed." << std::endl;
-                if (PostgresInternalAccess::get_negotiated_protocol_version(resp) != 0) {
-                    std::cout << "plain_32 Negotiated Version: " << PostgresInternalAccess::get_negotiated_protocol_version(resp) << std::endl;
+                if (resp->get_negotiated_protocol_version() != 0) {
+                    std::cout << "plain_32 Negotiated Version: " << resp->get_negotiated_protocol_version() << std::endl;
                 } else if (resp->is_error()) {
                     std::cout << "plain_32 Error: " << resp->get_error().message << std::endl;
                     test_result = 1;
@@ -121,10 +120,10 @@ int main(int argc, char *argv[]) {
                     } else {
                         auto *r = t->get_resp();
                         std::cout << "forced_option test completed." << std::endl;
-                        if (PostgresInternalAccess::get_negotiated_protocol_version(r) != 0) {
-                            std::cout << "forced_option Negotiated Version: " << PostgresInternalAccess::get_negotiated_protocol_version(r) << std::endl;
+                        if (r->get_negotiated_protocol_version() != 0) {
+                            std::cout << "forced_option Negotiated Version: " << r->get_negotiated_protocol_version() << std::endl;
                             bool found = false;
-                            for (const auto& opt : PostgresInternalAccess::get_negotiated_unsupported_options(r)) {
+                            for (const auto& opt : r->get_negotiated_unsupported_options()) {
                                 std::cout << "Unsupported Option Received: " << opt << std::endl;
                                 if (opt == "_pq_.unsupported_test") found = true;
                             }
@@ -144,15 +143,15 @@ int main(int argc, char *argv[]) {
             task2->get_req()->db_ = db;
             task2->get_req()->forced_option_key = "_pq_.unsupported_test";
             task2->get_req()->forced_option_val = "1";
-            PostgresInternalAccess::set_is_startup(task2->get_resp(), true);
-            PostgresInternalAccess::set_auth(task2->get_resp(), user, pass);
+            task2->get_resp()->set_is_startup(true);
+            task2->get_resp()->set_auth(user, pass);
             task2->start();
         });
     
     task1->get_req()->user_ = user;
     task1->get_req()->db_ = db;
-    PostgresInternalAccess::set_is_startup(task1->get_resp(), true);
-    PostgresInternalAccess::set_auth(task1->get_resp(), user, pass);
+    task1->get_resp()->set_is_startup(true);
+    task1->get_resp()->set_auth(user, pass);
     task1->start();
     
     wait_group.wait();

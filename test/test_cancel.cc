@@ -94,13 +94,13 @@ int main(int argc, char *argv[])
         
         long_task->start();
 
-        auto *timer = WFTaskFactory::create_timer_task(1000 * 1000, [url, pid, secret_data, &exit_code, &wait_group](WFTimerTask *) {
-            auto *cancel_task = WFPostgresTaskFactory::create_cancel_task(url, pid, secret_data, 0, [&exit_code, &wait_group](WFPostgresTask *t) {
+        auto *timer = WFTaskFactory::create_timer_task(1000 * 1000, [&conn, &exit_code, &wait_group](WFTimerTask *) {
+            auto *cancel_task = conn.create_cancel_task([&exit_code, &wait_group](WFPostgresTask *t) {
                 if (t->get_state() != WFT_STATE_SUCCESS) {
                     std::cerr << "Cancel request network failure.\n";
                     exit_code = 1;
                 } else {
-                    std::cout << "Cancel request dispatched.\n";
+                    std::cout << "Cancel request dispatched via connection without raw credentials.\n";
                 }
                 wait_group.done();
             });

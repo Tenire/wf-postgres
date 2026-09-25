@@ -1,5 +1,4 @@
 #include "workflow/WFFacilities.h"
-#include "../src/protocol/PostgresInternal.h"
 #include "WFPostgresConnection.h"
 #include "PostgresResult.h"
 #include <iostream>
@@ -64,7 +63,7 @@ int main(int argc, char *argv[])
                         });
                         good_query->start();
                     });
-                    PostgresInternalAccess::set_wait_notification(wait->get_req(), true);
+                    wait->get_req()->set_wait_notification(true);
                     
                     auto *notify = conn.create_query_task("NOTIFY test_chan;", nullptr);
                     wait->start();

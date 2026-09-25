@@ -65,6 +65,17 @@ namespace PostgresOid {
     const int32_t NUMERIC = 1700;
     const int32_t UUID = 2950;
     const int32_t JSONB = 3802;
+    const int32_t BOOL_ARRAY = 1000;
+    const int32_t BYTEA_ARRAY = 1001;
+    const int32_t INT2_ARRAY = 1005;
+    const int32_t INT4_ARRAY = 1007;
+    const int32_t TEXT_ARRAY = 1009;
+    const int32_t VARCHAR_ARRAY = 1015;
+    const int32_t INT8_ARRAY = 1016;
+    const int32_t FLOAT4_ARRAY = 1021;
+    const int32_t FLOAT8_ARRAY = 1022;
+    const int32_t UUID_ARRAY = 2951;
+    const int32_t JSONB_ARRAY = 3807;
 }
 
 } // namespace protocol

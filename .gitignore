@@ -5,3 +5,4 @@ build
 memory-bank
 .xmake
 .cache
+.codegraph

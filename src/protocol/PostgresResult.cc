@@ -339,13 +339,123 @@ std::vector<PostgresCell> PostgresCell::as_array() const {
     }
     return elements;
 }
+std::vector<uint8_t> PostgresCell::as_bytea() const {
+    std::vector<uint8_t> result;
+    if (is_null_ || length_ == 0 || !data_) return result;
+
+    if (field_ && field_->format == 1) {
+        const uint8_t *p = (const uint8_t *)data_;
+        result.assign(p, p + length_);
+        return result;
+    }
+
+    const char *str = (const char *)data_;
+    if (length_ >= 2 && str[0] == '\\' && (str[1] == 'x' || str[1] == 'X')) {
+        result.reserve((length_ - 2) / 2);
+        auto hex_val = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+            return 0;
+        };
+        for (size_t i = 2; i + 1 < length_; i += 2) {
+            uint8_t byte = (hex_val(str[i]) << 4) | hex_val(str[i + 1]);
+            result.push_back(byte);
+        }
+        return result;
+    }
+
+    result.assign((const uint8_t*)str, (const uint8_t*)str + length_);
+    return result;
+}
+
+std::vector<std::string> PostgresCell::as_string_array() const {
+    std::vector<std::string> res;
+    auto cells = as_array();
+    res.reserve(cells.size());
+    for (const auto& c : cells) {
+        res.push_back(c.as_string());
+    }
+    return res;
+}
+
+std::vector<int64_t> PostgresCell::as_bigint_array() const {
+    std::vector<int64_t> res;
+    auto cells = as_array();
+    res.reserve(cells.size());
+    for (const auto& c : cells) {
+        res.push_back(c.as_bigint());
+    }
+    return res;
+}
+
 
 PostgresResultCursor::PostgresResultCursor(PostgresResponse *resp) {
+    owns_resp_ = false;
     head_ = (const uint8_t *)resp->get_buf();
     end_ = head_ + resp->get_buf_size();
     cursor_ = head_;
     current_result_set_done_ = false;
     parse_metadata();
+}
+
+PostgresResultCursor::PostgresResultCursor(PostgresResponse&& resp)
+    : owns_resp_(true), owned_resp_(std::move(resp))
+{
+    head_ = (const uint8_t *)owned_resp_.get_buf();
+    end_ = head_ + owned_resp_.get_buf_size();
+    cursor_ = head_;
+    current_result_set_done_ = false;
+    parse_metadata();
+}
+
+PostgresResultCursor::PostgresResultCursor(PostgresResultCursor&& other) noexcept
+    : owns_resp_(other.owns_resp_),
+      owned_resp_(std::move(other.owned_resp_)),
+      fields_(std::move(other.fields_)),
+      command_tag_(std::move(other.command_tag_)),
+      current_result_set_done_(other.current_result_set_done_)
+{
+    size_t offset = (other.head_ && other.cursor_ >= other.head_) ? (other.cursor_ - other.head_) : 0;
+    if (owns_resp_) {
+        head_ = (const uint8_t *)owned_resp_.get_buf();
+        end_ = head_ + owned_resp_.get_buf_size();
+        cursor_ = head_ + offset;
+    } else {
+        head_ = other.head_;
+        end_ = other.end_;
+        cursor_ = other.cursor_;
+    }
+    other.head_ = nullptr;
+    other.end_ = nullptr;
+    other.cursor_ = nullptr;
+    other.owns_resp_ = false;
+}
+
+PostgresResultCursor& PostgresResultCursor::operator=(PostgresResultCursor&& other) noexcept {
+    if (this != &other) {
+        owns_resp_ = other.owns_resp_;
+        owned_resp_ = std::move(other.owned_resp_);
+        fields_ = std::move(other.fields_);
+        command_tag_ = std::move(other.command_tag_);
+        current_result_set_done_ = other.current_result_set_done_;
+
+        size_t offset = (other.head_ && other.cursor_ >= other.head_) ? (other.cursor_ - other.head_) : 0;
+        if (owns_resp_) {
+            head_ = (const uint8_t *)owned_resp_.get_buf();
+            end_ = head_ + owned_resp_.get_buf_size();
+            cursor_ = head_ + offset;
+        } else {
+            head_ = other.head_;
+            end_ = other.end_;
+            cursor_ = other.cursor_;
+        }
+        other.head_ = nullptr;
+        other.end_ = nullptr;
+        other.cursor_ = nullptr;
+        other.owns_resp_ = false;
+    }
+    return *this;
 }
 
 void PostgresResultCursor::parse_metadata() {
@@ -450,6 +560,40 @@ bool PostgresResultCursor::fetch_all(std::vector<std::vector<PostgresCell>>& row
         rows.push_back(row);
     }
     return !rows.empty();
+}
+
+bool PostgresResultCursor::fetch_row_copy(std::vector<PostgresCell>& row) {
+    if (!fetch_row(row)) return false;
+    for (auto& cell : row) {
+        cell.detach();
+    }
+    return true;
+}
+
+bool PostgresResultCursor::fetch_row_copy(std::map<std::string, PostgresCell>& row_map) {
+    if (!fetch_row(row_map)) return false;
+    for (auto& kv : row_map) {
+        kv.second.detach();
+    }
+    return true;
+}
+
+bool PostgresResultCursor::fetch_row_copy(std::unordered_map<std::string, PostgresCell>& row_map) {
+    if (!fetch_row(row_map)) return false;
+    for (auto& kv : row_map) {
+        kv.second.detach();
+    }
+    return true;
+}
+
+bool PostgresResultCursor::fetch_all_copy(std::vector<std::vector<PostgresCell>>& rows) {
+    if (!fetch_all(rows)) return false;
+    for (auto& row : rows) {
+        for (auto& cell : row) {
+            cell.detach();
+        }
+    }
+    return true;
 }
 
 bool PostgresResultCursor::next_result_set() {

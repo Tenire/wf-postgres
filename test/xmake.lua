@@ -164,3 +164,13 @@ target("test_notice")
     if is_plat("linux") and is_mode("asan") then
         add_runenvs("LSAN_OPTIONS", "suppressions=" .. os.projectdir() .. "/test/asan.supp")
     end
+
+target("test_abstractions")
+    set_kind("binary")
+    set_languages("cxx11")
+    add_deps("wf_postgres")
+    add_packages("workflow", "openssl")
+    add_files("test_abstractions.cc")
+    if is_plat("linux") and is_mode("asan") then
+        add_runenvs("LSAN_OPTIONS", "suppressions=" .. os.projectdir() .. "/test/asan.supp")
+    end

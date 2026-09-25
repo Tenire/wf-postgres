@@ -6,7 +6,7 @@
 #include "PostgresParser.h"
 #include "PostgresAuth.h"
 #include "PostgresResult.h"
-#include "PostgresInternal.h"
+#include "PostgresSSLMessage.h"
 
 namespace wfpg {
 namespace protocol {
@@ -14,6 +14,82 @@ namespace protocol {
 PostgresResponse::~PostgresResponse() {
     delete auth_;
 }
+PostgresResponse::PostgresResponse(PostgresResponse&& other) noexcept
+    : ::protocol::ProtocolMessage(std::move(other)),
+      buf_(std::move(other.buf_)),
+      cursor_(other.cursor_),
+      user_(std::move(other.user_)),
+      pass_(std::move(other.pass_)),
+      auth_(other.auth_),
+      is_error_(other.is_error_),
+      is_startup_(other.is_startup_),
+      is_copy_in_(other.is_copy_in_),
+      is_copy_out_(other.is_copy_out_),
+      error_(std::move(other.error_)),
+      backend_pid_(other.backend_pid_),
+      backend_secret_key_(other.backend_secret_key_),
+      backend_secret_data_(std::move(other.backend_secret_data_)),
+      transaction_state_(other.transaction_state_),
+      parameters_(std::move(other.parameters_)),
+      notifications_(std::move(other.notifications_)),
+      notices_(std::move(other.notices_)),
+      notify_mode_(other.notify_mode_),
+      negotiated_protocol_version_(other.negotiated_protocol_version_),
+      negotiated_unsupported_options_(std::move(other.negotiated_unsupported_options_)),
+      internal_error_(other.internal_error_)
+{
+    other.auth_ = nullptr;
+    other.cursor_ = 0;
+    other.is_error_ = false;
+    other.is_startup_ = false;
+    other.is_copy_in_ = false;
+    other.is_copy_out_ = false;
+    other.backend_pid_ = 0;
+    other.backend_secret_key_ = 0;
+    other.transaction_state_ = 'I';
+    other.internal_error_ = 0;
+}
+
+PostgresResponse& PostgresResponse::operator=(PostgresResponse&& other) noexcept {
+    if (this != &other) {
+        ::protocol::ProtocolMessage::operator=(std::move(other));
+        delete auth_;
+        buf_ = std::move(other.buf_);
+        cursor_ = other.cursor_;
+        user_ = std::move(other.user_);
+        pass_ = std::move(other.pass_);
+        auth_ = other.auth_;
+        is_error_ = other.is_error_;
+        is_startup_ = other.is_startup_;
+        is_copy_in_ = other.is_copy_in_;
+        is_copy_out_ = other.is_copy_out_;
+        error_ = std::move(other.error_);
+        backend_pid_ = other.backend_pid_;
+        backend_secret_key_ = other.backend_secret_key_;
+        backend_secret_data_ = std::move(other.backend_secret_data_);
+        transaction_state_ = other.transaction_state_;
+        parameters_ = std::move(other.parameters_);
+        notifications_ = std::move(other.notifications_);
+        notices_ = std::move(other.notices_);
+        notify_mode_ = other.notify_mode_;
+        negotiated_protocol_version_ = other.negotiated_protocol_version_;
+        negotiated_unsupported_options_ = std::move(other.negotiated_unsupported_options_);
+        internal_error_ = other.internal_error_;
+
+        other.auth_ = nullptr;
+        other.cursor_ = 0;
+        other.is_error_ = false;
+        other.is_startup_ = false;
+        other.is_copy_in_ = false;
+        other.is_copy_out_ = false;
+        other.backend_pid_ = 0;
+        other.backend_secret_key_ = 0;
+        other.transaction_state_ = 'I';
+        other.internal_error_ = 0;
+    }
+    return *this;
+}
+
 
 void PostgresResponse::set_auth(const std::string& user, const std::string& pass) {
     user_ = user;

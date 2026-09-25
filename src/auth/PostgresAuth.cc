@@ -1,9 +1,17 @@
+/*
+  PostgreSQL Startup & Authentication Dispatcher.
+  References:
+    - PostgreSQL Protocol Specification 3.0/3.2: Startup & Authentication Flow
+      https://www.postgresql.org/docs/current/protocol-flow.html#PROTOCOL-FLOW-START-UP
+    - MD5 Authentication: 'md5' + md5(md5(password + username) + salt)
+    - SASL Authentication: RFC 5802 / RFC 7677 via ScramAuth
+*/
+
 #include "PostgresAuth.h"
 #include "ScramAuth.h"
 #include "PostgresWireUtil.h"
 #include <openssl/evp.h>
 #include "WFPostgresError.h"
-#include "PostgresInternal.h"
 
 namespace wfpg {
 namespace protocol {
@@ -88,7 +96,7 @@ int PostgresAuth::process_auth_request(const uint8_t *payload, size_t payload_si
 
         if (!supports_scram_sha_256) {
             resp->set_error_fatal("Server does not support SCRAM-SHA-256");
-            PostgresInternalAccess::set_internal_error(resp, WFT_ERR_POSTGRES_UNSUPPORTED_AUTH);
+            resp->set_internal_error(WFT_ERR_POSTGRES_UNSUPPORTED_AUTH);
             return -1;
         }
 
@@ -148,7 +156,7 @@ int PostgresAuth::process_auth_request(const uint8_t *payload, size_t payload_si
         }
     } else {
         resp->set_error_fatal("Unsupported authentication request type: " + std::to_string(auth_type));
-        PostgresInternalAccess::set_internal_error(resp, WFT_ERR_POSTGRES_UNSUPPORTED_AUTH);
+        resp->set_internal_error(WFT_ERR_POSTGRES_UNSUPPORTED_AUTH);
         return -1;
     }
     return 0;

@@ -6,10 +6,10 @@
 #include <map>
 #include "workflow/ProtocolMessage.h"
 #include "PostgresTypes.h"
-
+#include "PostgresValue.h"
 namespace wfpg {
 class WFPostgresConnection;
-
+class WFPostgresTaskFactory;
 namespace protocol {
 
 class PostgresRequest : public ::protocol::ProtocolMessage
@@ -21,7 +21,6 @@ public:
     // Public User API
     void set_query(const std::string& query) { query_ = query; }
     const std::string& get_query() const { return query_; }
-    
     void set_query(const std::string& query, const std::vector<std::string>& params) {
         query_ = query;
         params_.clear();
@@ -34,9 +33,17 @@ public:
         params_ = params;
         has_params_ = true;
     }
+    template <typename T, typename... Args>
+    void set_query(const std::string& query, const T& first, const Args&... rest) {
+        query_ = query;
+        params_ = bind_params(first, rest...);
+        has_params_ = true;
+    }
+
+    bool has_params() const { return has_params_; }
+    const std::vector<PostgresParameter>& get_params() const { return params_; }
 
     void set_statement_name(const std::string& name) { statement_name_ = name; }
-    const std::string& get_statement_name() const { return statement_name_; }
 
     void set_portal_name(const std::string& name) { portal_name_ = name; }
     const std::string& get_portal_name() const { return portal_name_; }
@@ -59,6 +66,11 @@ public:
     }
 
     void set_wait_notification(bool wait) { wait_notification_ = wait; }
+    bool is_wait_notification() const { return wait_notification_; }
+    bool is_copy() const { return is_copy_; }
+    bool is_copy_done() const { return copy_done_; }
+    bool is_copy_fail() const { return copy_fail_; }
+    bool is_disconnect() const { return is_disconnect_; }
 
 protected:
     virtual int encode(struct iovec vectors[], int max) override;
@@ -67,14 +79,14 @@ protected:
 private:
     friend class ComplexPostgresTask;
     friend class wfpg::WFPostgresConnection;
-    friend struct PostgresInternalAccess;
+    friend class wfpg::WFPostgresTaskFactory;
 
     // Internal Setters (Hidden from User API)
     void set_is_startup(bool startup) { is_startup_ = startup; }
     bool is_startup() const { return is_startup_; }
 
     void set_is_disconnect(bool disconnect) { is_disconnect_ = disconnect; }
-    bool is_disconnect() const { return is_disconnect_; }
+
 
     void set_auth(const std::string& user, const std::string& db, const std::string& pass) {
         user_ = user;
@@ -92,10 +104,7 @@ private:
     }
     bool is_cancel() const { return is_cancel_; }
 
-    bool is_copy() const { return is_copy_; }
-    bool is_copy_done() const { return copy_done_; }
-    bool is_copy_fail() const { return copy_fail_; }
-    bool is_wait_notification() const { return wait_notification_; }
+
 
     void set_protocol_version(uint32_t version) { protocol_version_ = version; }
     uint32_t get_protocol_version() const { return protocol_version_; }

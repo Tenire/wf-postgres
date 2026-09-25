@@ -1,3 +1,12 @@
+/*
+  PostgreSQL Backend Message Parser & Event Classification.
+  References:
+    - PostgreSQL Protocol Specification: Message Formats
+      https://www.postgresql.org/docs/current/protocol-message-formats.html
+    - PostgreSQL Protocol Specification: Formats and Conventions
+      https://www.postgresql.org/docs/current/protocol-overview.html
+*/
+
 #include "PostgresParser.h"
 #include "PostgresWireUtil.h"
 #include <arpa/inet.h>
