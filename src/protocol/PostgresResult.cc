@@ -222,6 +222,39 @@ bool PostgresCell::as_time(struct tm *tm, int *usec) const {
     }
 }
 
+static bool parse_timezone_offset(const char *p, int *offset_seconds, const char **endptr) {
+    if (*p == 'Z' || *p == 'z') {
+        *offset_seconds = 0;
+        *endptr = p + 1;
+        return true;
+    }
+    if (*p == '+' || *p == '-') {
+        int sign = (*p == '+') ? 1 : -1;
+        p++;
+        int h = 0, m = 0;
+        if (!isdigit(p[0]) || !isdigit(p[1])) {
+            return false;
+        }
+        h = (p[0] - '0') * 10 + (p[1] - '0');
+        p += 2;
+        if (*p == ':') {
+            p++;
+            if (!isdigit(p[0]) || !isdigit(p[1])) {
+                return false;
+            }
+            m = (p[0] - '0') * 10 + (p[1] - '0');
+            p += 2;
+        } else if (isdigit(p[0]) && isdigit(p[1])) {
+            m = (p[0] - '0') * 10 + (p[1] - '0');
+            p += 2;
+        }
+        *offset_seconds = sign * (h * 3600 + m * 60);
+        *endptr = p;
+        return true;
+    }
+    return false;
+}
+
 bool PostgresCell::as_datetime(struct tm *tm, int *usec) const {
     if (is_null_ || !tm) { errno = EINVAL; return false; }
     memset(tm, 0, sizeof(struct tm));
@@ -241,11 +274,14 @@ bool PostgresCell::as_datetime(struct tm *tm, int *usec) const {
     } else {
         std::string s((const char*)data_, length_);
         char* end = strptime(s.c_str(), "%Y-%m-%d %H:%M:%S", tm);
+        if (!end) {
+            end = strptime(s.c_str(), "%Y-%m-%dT%H:%M:%S", tm);
+        }
         if (end != nullptr) {
+            int temp_usec = 0;
             if (*end == '.') {
                 end++;
                 int count = 0;
-                int temp_usec = 0;
                 int mult = 100000;
                 while (isdigit(*end)) {
                     if (count < 6) {
@@ -255,17 +291,59 @@ bool PostgresCell::as_datetime(struct tm *tm, int *usec) const {
                     end++;
                     count++;
                 }
-                if (count > 0 && count <= 6 && *end == '\0') {
+            }
+
+            // Check for optional timezone offset
+            if (*end != '\0') {
+                int tz_offset = 0;
+                const char *tz_end = nullptr;
+                if (parse_timezone_offset(end, &tz_offset, &tz_end) && *tz_end == '\0') {
+                    // Convert local tm to UTC epoch and back to normalize
+                    time_t local_epoch = timegm(tm);
+                    if (local_epoch != (time_t)-1) {
+                        time_t utc_epoch = local_epoch - tz_offset;
+                        gmtime_r(&utc_epoch, tm);
+                    }
                     if (usec) *usec = temp_usec;
                     return true;
                 }
-            } else if (*end == '\0') {
-                if (usec) *usec = 0;
+            } else {
+                if (usec) *usec = temp_usec;
                 return true;
             }
         }
         errno = EINVAL;
         return false;
+    }
+}
+
+std::chrono::system_clock::time_point PostgresCell::as_time_point() const {
+    if (is_null_) {
+        errno = EINVAL;
+        return std::chrono::system_clock::time_point{};
+    }
+
+    if (field_ && field_->format == 1) {
+        if (length_ != 8) {
+            errno = EINVAL;
+            return std::chrono::system_clock::time_point{};
+        }
+        int64_t v = as_bigint();
+        int64_t epoch_micros = v + 946684800000000LL; // 2000-01-01 to 1970-01-01 in microseconds
+        return std::chrono::system_clock::time_point(std::chrono::microseconds(epoch_micros));
+    } else {
+        struct tm tm_val;
+        int usec = 0;
+        if (!as_datetime(&tm_val, &usec)) {
+            return std::chrono::system_clock::time_point{};
+        }
+        time_t sec = timegm(&tm_val);
+        if (sec == (time_t)-1) {
+            errno = EINVAL;
+            return std::chrono::system_clock::time_point{};
+        }
+        int64_t total_micros = (int64_t)sec * 1000000LL + usec;
+        return std::chrono::system_clock::time_point(std::chrono::microseconds(total_micros));
     }
 }
 

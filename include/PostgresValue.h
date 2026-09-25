@@ -97,14 +97,21 @@ public:
         auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration);
         auto micros = std::chrono::duration_cast<std::chrono::microseconds>(duration - seconds);
 
-        std::time_t tt = seconds.count();
+        int64_t sec_count = seconds.count();
+        int64_t usec_count = micros.count();
+        if (usec_count < 0) {
+            usec_count += 1000000;
+            --sec_count;
+        }
+
+        std::time_t tt = (std::time_t)sec_count;
         struct tm tm_val;
         gmtime_r(&tt, &tm_val);
 
+        char full_buf[128];
         char buf[64];
         strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm_val);
-        char full_buf[80];
-        snprintf(full_buf, sizeof(full_buf), "%s.%06ld+00", buf, (long)micros.count());
+        snprintf(full_buf, sizeof(full_buf), "%s.%06d+00", buf, (int)usec_count);
         data_ = full_buf;
     }
 

@@ -6,8 +6,8 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include <chrono>
 #include <string.h>
-
 #include "PostgresTypes.h"
 #include "PostgresResponse.h"
 namespace wfpg {
@@ -110,6 +110,7 @@ public:
     bool as_date(struct tm *tm) const;
     bool as_time(struct tm *tm, int *usec = nullptr) const;
     bool as_datetime(struct tm *tm, int *usec = nullptr) const;
+    std::chrono::system_clock::time_point as_time_point() const;
     std::string as_string() const;
     std::string as_jsonb_string() const;
     std::string as_uuid_string() const;

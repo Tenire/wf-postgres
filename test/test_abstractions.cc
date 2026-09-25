@@ -185,6 +185,98 @@ void test_transaction_e_state_reset() {
     std::cout << "  Passed Transaction 'E' state detection and lifecycle\n";
 }
 
+void test_timestamptz_and_time_point() {
+    std::cout << "[Test] TIMESTAMPTZ, microsecond precision, and as_time_point()...\n";
+
+    // 1. PostgresValue time_point serialization
+    auto now = std::chrono::system_clock::now();
+    PostgresValue val_now(now);
+    assert(!val_now.is_null());
+    assert(val_now.type_oid() == PostgresOid::TIMESTAMPTZ);
+    // Verify ends with +00
+    std::string s_now = val_now.data();
+    assert(s_now.size() >= 23); // "YYYY-MM-DD HH:MM:SS.uuuuuu+00"
+    assert(s_now.substr(s_now.size() - 3) == "+00");
+
+    // Test epoch-exact time_point with microseconds
+    int64_t expected_micros = 1790000000123456LL; // around 2026
+    std::chrono::system_clock::time_point tp_exact{std::chrono::microseconds(expected_micros)};
+    PostgresValue val_exact(tp_exact);
+    std::string s_exact = val_exact.data();
+    assert(s_exact.find(".123456+00") != std::string::npos);
+
+    // 2. PostgresCell as_datetime with various TIMESTAMPTZ formats (Format 0 Text)
+    PostgresField field_tz;
+    field_tz.name = "created_at";
+    field_tz.type_oid = PostgresOid::TIMESTAMPTZ;
+    field_tz.format = 0;
+
+    // Case A: UTC with +00
+    std::string text_utc = "2026-09-25 14:30:00.123456+00";
+    PostgresCell cell_utc(text_utc.data(), text_utc.size(), false, &field_tz);
+    struct tm tm_utc;
+    int usec_utc = 0;
+    assert(cell_utc.as_datetime(&tm_utc, &usec_utc));
+    assert(usec_utc == 123456);
+    assert(tm_utc.tm_year == 2026 - 1900);
+    assert(tm_utc.tm_mon == 8); // September = 8 (0-based)
+    assert(tm_utc.tm_mday == 25);
+    assert(tm_utc.tm_hour == 14);
+    assert(tm_utc.tm_min == 30);
+    assert(tm_utc.tm_sec == 0);
+
+    auto parsed_tp_utc = cell_utc.as_time_point();
+    auto actual_micros_utc = std::chrono::duration_cast<std::chrono::microseconds>(
+        parsed_tp_utc.time_since_epoch()).count();
+
+    // Case B: +08:00 (Asia/Shanghai) -> should normalize to UTC 14:30:00
+    std::string text_cst = "2026-09-25 22:30:00.123456+08:00";
+    PostgresCell cell_cst(text_cst.data(), text_cst.size(), false, &field_tz);
+    struct tm tm_cst;
+    int usec_cst = 0;
+    assert(cell_cst.as_datetime(&tm_cst, &usec_cst));
+    assert(usec_cst == 123456);
+    assert(tm_cst.tm_hour == 14); // 22:30 - 8 hours = 14:30 UTC
+    auto parsed_tp_cst = cell_cst.as_time_point();
+    auto actual_micros_cst = std::chrono::duration_cast<std::chrono::microseconds>(
+        parsed_tp_cst.time_since_epoch()).count();
+    assert(actual_micros_utc == actual_micros_cst);
+
+    // Case C: ISO 8601 with 'T' and 'Z'
+    std::string text_iso = "2026-09-25T14:30:00.123456Z";
+    PostgresCell cell_iso(text_iso.data(), text_iso.size(), false, &field_tz);
+    assert(cell_iso.as_time_point() == parsed_tp_utc);
+
+    // Case D: Negative timezone offset (-05:00)
+    std::string text_est = "2026-09-25 09:30:00.123456-05";
+    PostgresCell cell_est(text_est.data(), text_est.size(), false, &field_tz);
+    assert(cell_est.as_time_point() == parsed_tp_utc);
+
+    // 3. Roundtrip consistency: time_point -> PostgresValue -> PostgresCell -> time_point
+    PostgresCell cell_roundtrip(s_exact.data(), s_exact.size(), false, &field_tz);
+    auto tp_res = cell_roundtrip.as_time_point();
+    int64_t res_micros = std::chrono::duration_cast<std::chrono::microseconds>(
+        tp_res.time_since_epoch()).count();
+    assert(res_micros == expected_micros);
+
+    // 4. Binary Format 1 as_time_point()
+    PostgresField field_bin;
+    field_bin.name = "created_at";
+    field_bin.type_oid = PostgresOid::TIMESTAMPTZ;
+    field_bin.format = 1;
+    // Binary PG timestamp = microseconds since 2000-01-01 00:00:00 UTC
+    // 2000-01-01 UTC is 946684800 seconds = 946684800000000 microseconds from 1970
+    int64_t pg_micros = expected_micros - 946684800000000LL;
+    uint64_t be_val = htobe64((uint64_t)pg_micros);
+    PostgresCell cell_bin(&be_val, 8, false, &field_bin);
+    auto tp_bin = cell_bin.as_time_point();
+    int64_t bin_micros = std::chrono::duration_cast<std::chrono::microseconds>(
+        tp_bin.time_since_epoch()).count();
+    assert(bin_micros == expected_micros);
+
+    std::cout << "  Passed TIMESTAMPTZ, microsecond precision, and as_time_point()\n";
+}
+
 
 
 int main() {
@@ -193,6 +285,7 @@ int main() {
     test_request_natural_binding();
     test_status_unification();
     test_transaction_e_state_reset();
+    test_timestamptz_and_time_point();
     std::cout << "All architectural remediation tests PASSED successfully!\n";
     return 0;
 }
