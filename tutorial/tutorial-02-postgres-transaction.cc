@@ -1,11 +1,10 @@
 #include <iostream>
 #include <string>
 #include "workflow/WFFacilities.h"
-#include "WFPostgresConnection.h"
+#include "WFPostgresClient.h"
 
 using namespace wfpg;
 using namespace wfpg::protocol;
-
 int main(int argc, char *argv[])
 {
     if (argc < 2) {
@@ -24,72 +23,86 @@ int main(int argc, char *argv[])
 
     WFFacilities::WaitGroup wait_group(1);
 
-    auto cb_rollback = [&wait_group](WFPostgresTask *task) {
-        std::cout << "[ROLLBACK] finished with state: " << task->get_state() << std::endl;
+    auto cb_rollback = [&conn, &wait_group](WFPostgresTask *task) {
+        PostgresStatus status = PostgresStatus::from_task(task);
+        std::cout << "[ROLLBACK] finished: " << status.to_string()
+                  << " (tx state: " << conn.get_last_transaction_state() << ")" << std::endl;
         wait_group.done();
     };
 
     auto cb_error = [&conn, &cb_rollback](WFPostgresTask *task) {
-        std::cerr << "Query failed (state: " << task->get_state() << ", error: " << task->get_error() << "), rolling back..." << std::endl;
-        if (task->get_resp()->is_error()) {
-            std::cerr << "DB Error: " << task->get_resp()->get_error().message << std::endl;
-        }
+        PostgresStatus status = PostgresStatus::from_task(task);
+        std::cerr << "Query failed: " << status.to_string()
+                  << ", is_transaction_failed=" << conn.is_transaction_failed()
+                  << ", rolling back..." << std::endl;
         WFPostgresTask *rollback = conn.create_query_task("ROLLBACK", cb_rollback);
         series_of(task)->push_back(rollback);
     };
 
-    auto cb_commit = [&wait_group](WFPostgresTask *task) {
-        std::cout << "[COMMIT] finished with state: " << task->get_state() << std::endl;
+    auto cb_commit = [&conn, &wait_group](WFPostgresTask *task) {
+        PostgresStatus status = PostgresStatus::from_task(task);
+        std::cout << "[COMMIT] finished: " << status.to_string()
+                  << " (tx state: " << conn.get_last_transaction_state() << ")" << std::endl;
         wait_group.done();
     };
 
-    auto cb_insert2 = [&conn, cb_commit, cb_error](WFPostgresTask *task) {
-        if (task->get_state() != WFT_STATE_SUCCESS || task->get_resp()->is_error()) {
+    auto cb_step2 = [&conn, cb_commit, cb_error](WFPostgresTask *task) {
+        PostgresStatus status = PostgresStatus::from_task(task);
+        if (!status.ok()) {
             cb_error(task);
             return;
         }
-        std::cout << "[INSERT 2] Success! Now committing..." << std::endl;
+        std::cout << "[STEP 2] Success! Now committing..." << std::endl;
         WFPostgresTask *commit = conn.create_query_task("COMMIT", cb_commit);
         series_of(task)->push_back(commit);
     };
 
-    auto cb_insert1 = [&conn, cb_insert2, cb_error](WFPostgresTask *task) {
-        if (task->get_state() != WFT_STATE_SUCCESS || task->get_resp()->is_error()) {
+    auto cb_step1 = [&conn, cb_step2, cb_error](WFPostgresTask *task) {
+        PostgresStatus status = PostgresStatus::from_task(task);
+        if (!status.ok()) {
             cb_error(task);
             return;
         }
-        std::cout << "[INSERT 1] Success! Now executing bad query (Division by zero) to trigger error..." << std::endl;
-        WFPostgresTask *bad_query = conn.create_query_task("SELECT 1 / 0;", cb_insert2);
-        series_of(task)->push_back(bad_query);
+        std::cout << "[STEP 1] Success! Now executing parameterized query with bind_params..." << std::endl;
+        // Using type-safe variadic bind_params directly on conn.create_query_task
+        WFPostgresTask *step2 = conn.create_query_task(
+            "SELECT $1::int AS id, $2::text AS note;",
+            cb_step2,
+            1001,
+            "test transaction note"
+        );
+        series_of(task)->push_back(step2);
     };
 
-    auto cb_begin = [&conn, cb_insert1, cb_error](WFPostgresTask *task) {
-        if (task->get_state() != WFT_STATE_SUCCESS || task->get_resp()->is_error()) {
+    auto cb_begin = [&conn, cb_step1, cb_error](WFPostgresTask *task) {
+        PostgresStatus status = PostgresStatus::from_task(task);
+        if (!status.ok()) {
             cb_error(task);
             return;
         }
-        std::cout << "[BEGIN] Success! Now executing INSERT 1..." << std::endl;
-        WFPostgresTask *insert1 = conn.create_query_task("SELECT 1 AS num;", cb_insert1);
-        series_of(task)->push_back(insert1);
+        std::cout << "[BEGIN] Success! In transaction: " << conn.in_transaction() << std::endl;
+        WFPostgresTask *step1 = conn.create_query_task("SELECT 1 AS num;", cb_step1);
+        series_of(task)->push_back(step1);
     };
 
     WFPostgresTask *begin_task = conn.create_query_task("BEGIN", cb_begin);
     begin_task->start();
-
     wait_group.wait();
 
     // Disconnect connection gracefully
     WFFacilities::WaitGroup disconnect_wg(1);
     WFPostgresTask *disconnect_task = conn.create_disconnect_task([&disconnect_wg](WFPostgresTask *task) {
-        if (task->get_state() == WFT_STATE_SUCCESS) {
+        PostgresStatus status = PostgresStatus::from_task(task);
+        if (status.ok()) {
             std::cout << "[DISCONNECT] Connection terminated gracefully." << std::endl;
         } else {
-            std::cerr << "[DISCONNECT] Failed with state: " << task->get_state() << " error: " << task->get_error() << std::endl;
+            std::cerr << "[DISCONNECT] Failed: " << status.to_string() << std::endl;
         }
         disconnect_wg.done();
     });
     disconnect_task->start();
     disconnect_wg.wait();
 
+    conn.deinit();
     return 0;
 }
