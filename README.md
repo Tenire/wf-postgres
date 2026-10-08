@@ -29,7 +29,7 @@
   - Out-of-band CancelRequest supporting both legacy 4-byte and Protocol 3.2 32-byte keys.
 - 🛡️ **Transaction Safety & Reconnect Guard**:
   - Connection-level pinning via `WFPostgresConnection`.
-  - Reconnect Guard intercepts abnormal socket disconnects during transactions to eliminate connection crosstalk and session poisoning.
+  - Automatic idle reconnection with transaction and streaming-operation protection.
   - Automatic connection cleanup on failed transactions (`'E'` state): unconditional `keep_alive = 0` to close socket and prevent poisoned sockets in connection pools.
 - 🚦 **Unified Error Handling**:
   - `PostgresStatus` combines network transport errors and database SQLSTATE/server errors under a single `status.ok()` check.
@@ -277,6 +277,16 @@ int main() {
     return 0;
 }
 ```
+
+#### Connection lifecycle
+
+- `WFPostgresConnection` binds sequential requests to the same connection while it remains available. Keep the object alive until all its tasks complete.
+- After idle connection loss, a query reconnects automatically if the last completed response reported `ReadyForQuery='I'`.
+- Loss of a connection during a transaction (`'T'`/`'E'`), COPY or a request with an unknown execution result prevents further SQL from running on a new session. Execute `create_disconnect_task()` successfully before reusing the connection after such a failure.
+- Reconnection creates a new PostgreSQL session. Session-local settings, temporary tables, prepared statements and `LISTEN` subscriptions are not restored. COPY and notification-wait requests require the original session. SQL is not automatically replayed.
+- `set_keep_alive()` configures idle retention in milliseconds; defaults are 30 seconds for pooled tasks and 3600 seconds for fixed connections. Failed transactions close the connection regardless of this setting.
+- `get_last_transaction_state()` returns the last confirmed server state. `deinit()` releases the owned SSL context; use `create_disconnect_task()` to close the connection.
+
 
 ### 4. Asynchronous LISTEN / NOTIFY
 

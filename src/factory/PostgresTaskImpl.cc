@@ -1,4 +1,5 @@
 #include "PostgresTask.h"
+#include "WFPostgresConnection.h"
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include <openssl/err.h>
@@ -28,6 +29,13 @@ enum PostgresProtocolState {
     PG_PROTOCOL_COPY_IN = 1,
     PG_PROTOCOL_NOTIFY_WAIT = 2,
     PG_PROTOCOL_BROKEN = 3
+};
+
+// Stored on the logical route, which survives idle socket removal.
+enum PostgresContinuityState {
+    PG_CONTINUITY_NEW = 0,
+    PG_CONTINUITY_IDLE = 'I',
+    PG_CONTINUITY_UNKNOWN = -1
 };
 
 struct PostgresConnection : public WFConnection
@@ -266,37 +274,22 @@ static bool handle_startup_auth_completion(
 }
 
 static bool check_reconnect_guard(
-    bool is_fixed_conn, 
-    ::RouteManager::RouteTarget* target, 
-    PostgresConnection* conn, 
-    int& error_code) 
+    bool is_fixed_conn,
+    bool allow_idle_reconnect,
+    ::RouteManager::RouteTarget* target,
+    PostgresConnection* conn,
+    int& error_code)
 {
     if (conn && conn->state == 3) {
-        if (is_fixed_conn && target) {
-            if (target->state) {
-                error_code = ECONNRESET;
-                return false;
-            }
-            target->state = 1;
+        if (is_fixed_conn && target && target->state != PG_CONTINUITY_NEW &&
+            !(allow_idle_reconnect && target->state == PG_CONTINUITY_IDLE)) {
+            target->state = PG_CONTINUITY_UNKNOWN;
+            error_code = ECONNRESET;
+            return false;
         }
         conn->state = 4;
     }
     return true;
-}
-
-static void cleanup_fixed_conn_target(
-    bool is_fixed_conn, 
-    ::RouteManager::RouteTarget* target, 
-    int task_state, 
-    int keep_alive_timeo) 
-{
-    if (is_fixed_conn) {
-        if (task_state != WFT_STATE_SUCCESS || keep_alive_timeo == 0) {
-            if (target) {
-                target->state = 0;
-            }
-        }
-    }
 }
 
 static bool validate_request(PostgresConnection* conn, PostgresRequest* req, int& error_code) {
@@ -394,6 +387,7 @@ public:
         my_ssl_ctx_ = ctx;
         owns_ssl_ctx_ = false;
     }
+    void set_connection_handle(WFPostgresConnection *connection) { connection_handle_ = connection; }
     SSL_CTX *get_my_ssl_ctx() const { return my_ssl_ctx_; }
     const ParsedURI *get_current_uri() const { return &this->uri_; }
     bool get_backend_credentials(int32_t *pid, std::string *secret) const {
@@ -421,6 +415,8 @@ private:
     std::string db_;
     std::map<std::string, std::string> startup_params_;
     bool is_user_request_ = true;
+    WFPostgresConnection *connection_handle_ = nullptr;
+    bool user_request_started_ = false;
     bool is_ssl_ = false;
     bool verify_full_ = false;
     bool owns_ssl_ctx_ = false;
@@ -478,24 +474,23 @@ CommMessageOut *ComplexPostgresTask::message_out()
         return wrap_ssl(conn, startup_req_);
     }
 
-    // ==========================================
-    // 2. User Request Validation (Protocol State)
-    // ==========================================
     req = this->get_req();
     int error_code = 0;
+    is_user_request_ = true;
+    auto *target = (RouteManager::RouteTarget *)this->target;
+    bool allow_idle_reconnect = !req->is_wait_notification() && !req->is_copy();
+    if (!req->is_disconnect() &&
+        !check_reconnect_guard(this->is_fixed_conn(), allow_idle_reconnect, target, conn, error_code)) {
+        errno = error_code;
+        return nullptr;
+    }
     if (!validate_request(conn, req, error_code)) {
         errno = error_code;
         return nullptr;
     }
-
-    // ==========================================
-    // 3. User Request Preparation
-    // ==========================================
-    is_user_request_ = true;
-    if (!check_reconnect_guard(this->is_fixed_conn(), (RouteManager::RouteTarget *)this->target, conn, error_code)) {
-        errno = error_code;
-        return nullptr;
-    }
+    user_request_started_ = true;
+    if (this->is_fixed_conn() && target && !req->is_cancel() && !req->is_disconnect())
+        target->state = PG_CONTINUITY_UNKNOWN;
     
     if (conn && conn->ssl) {
         return wrap_ssl(conn, req);
@@ -553,17 +548,14 @@ int ComplexPostgresTask::keep_alive_timeout()
     }
 
     auto *resp = (protocol::PostgresResponse *)this->get_resp();
-    char tx_state = resp->get_transaction_state();
+    char tx_state = resp ? resp->get_transaction_state() : 'I';
 
     if (tx_state == 'E') {
         return 0;
     }
 
-    if (tx_state == 'T') {
-        if (!this->is_fixed_conn()) {
-            return 0;
-        }
-    }
+    if (tx_state == 'T' && !this->is_fixed_conn())
+        return 0;
 
     return this->keep_alive_timeo;
 }
@@ -622,7 +614,6 @@ bool ComplexPostgresTask::init_success()
 
 bool ComplexPostgresTask::finish_once()
 {
-    cleanup_fixed_conn_target(this->is_fixed_conn(), (RouteManager::RouteTarget *)this->target, this->state, this->keep_alive_timeout());
 
     if (this->state != WFT_STATE_SUCCESS) {
         return true;
@@ -669,7 +660,32 @@ void ComplexPostgresTask::handle(int state, int error)
 
     auto *wf_conn = this->WFComplexClientTask::get_connection();
     auto *conn = (PostgresConnection *)(wf_conn ? wf_conn->get_context() : nullptr);
-    update_after_response(conn, this->get_req(), this->get_resp(), state);
+    if (is_user_request_)
+        update_after_response(conn, this->get_req(), this->get_resp(), state);
+
+    if (is_user_request_ && this->is_fixed_conn() && this->target) {
+        auto *target = (RouteManager::RouteTarget *)this->target;
+        auto *resp = this->get_resp();
+        if (this->get_req()->is_disconnect() && state == WFT_STATE_SUCCESS) {
+            target->state = PG_CONTINUITY_NEW;
+            if (connection_handle_) {
+                connection_handle_->last_tx_state_ = 'I';
+                connection_handle_->backend_pid_ = 0;
+                connection_handle_->backend_secret_data_.clear();
+            }
+        } else if (user_request_started_ && state == WFT_STATE_SUCCESS) {
+            target->state = resp->ready_for_query_ ? resp->get_transaction_state() : PG_CONTINUITY_UNKNOWN;
+            if (connection_handle_) {
+                if (resp->ready_for_query_)
+                    connection_handle_->last_tx_state_ = resp->get_transaction_state();
+                connection_handle_->backend_pid_ = resp->get_backend_pid();
+                connection_handle_->backend_secret_data_ = resp->get_backend_secret_data();
+            }
+        } else if (user_request_started_ && connection_handle_) {
+            connection_handle_->backend_pid_ = 0;
+            connection_handle_->backend_secret_data_.clear();
+        }
+    }
 
     ::WFComplexClientTask<PostgresRequest, PostgresResponse>::handle(state, error);
 }
@@ -679,9 +695,14 @@ WFConnection *ComplexPostgresTask::get_connection() const
     return this->WFComplexClientTask::get_connection();
 }
 
-void __postgres_task_set_ssl_ctx(WFPostgresTask *task, void *ssl_ctx)
+void postgres_task_set_ssl_ctx(WFPostgresTask *task, void *ssl_ctx)
 {
     ((ComplexPostgresTask *)task)->set_my_ssl_ctx((SSL_CTX *)ssl_ctx);
+}
+
+void postgres_task_set_connection_handle(WFPostgresTask *task, WFPostgresConnection *connection)
+{
+    ((ComplexPostgresTask *)task)->set_connection_handle(connection);
 }
 
 } // namespace protocol
@@ -743,11 +764,10 @@ WFPostgresTask *WFPostgresTaskFactory::create_cancel_task(const ParsedURI& uri,
     } else {
         query = "cancel=1";
     }
+    free(cancel_uri.query);
     cancel_uri.query = strdup(query.c_str());
 
     WFPostgresTask *task = create_postgres_task(cancel_uri, retry_max, std::move(callback));
-    if (cancel_uri.query)
-        free(cancel_uri.query);
     task->get_req()->set_cancel(pid, secret_data);
     task->set_keep_alive(0);
     return task;

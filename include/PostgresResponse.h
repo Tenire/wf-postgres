@@ -93,6 +93,7 @@ private:
         is_error_ = false;
         is_copy_in_ = false;
         is_copy_out_ = false;
+        ready_for_query_ = false;
         error_ = PostgresError();
         negotiated_protocol_version_ = 0;
         negotiated_unsupported_options_.clear();
@@ -123,6 +124,7 @@ private:
     int32_t backend_secret_key_;
     std::string backend_secret_data_;
     char transaction_state_; // 'I', 'T', 'E'
+    bool ready_for_query_ = false;
     std::map<std::string, std::string> parameters_;
     std::vector<PostgresNotification> notifications_;
     std::vector<PostgresError> notices_;

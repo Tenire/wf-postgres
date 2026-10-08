@@ -6,6 +6,7 @@
 #include "PostgresTask.h"
 
 namespace wfpg {
+class WFPostgresConnection;
 namespace protocol {
 
 // Internal SSL Startup Request for STARTTLS
@@ -26,7 +27,8 @@ private:
     char byte_ = 0;
 };
 
-void __postgres_task_set_ssl_ctx(WFPostgresTask *task, void *ssl_ctx);
+void postgres_task_set_ssl_ctx(WFPostgresTask *task, void *ssl_ctx);
+void postgres_task_set_connection_handle(WFPostgresTask *task, WFPostgresConnection *connection);
 
 } // namespace protocol
 } // namespace wfpg

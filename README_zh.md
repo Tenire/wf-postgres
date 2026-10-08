@@ -30,7 +30,7 @@
   - 带外 CancelRequest 取消正在执行的查询（兼容传统 4 字节与 Protocol 3.2 32 字节密钥）。
 - 🛡️ **事务安全与重连保护（Reconnect Guard）**：
   - 通过 `WFPostgresConnection` 实现连接级别绑定（Fixed Connection）。
-  - Reconnect Guard 拦截异常断开，杜绝连接池复用导致的事务状态污染与串话。
+  - 自动处理空闲连接重连，保护事务与流式操作。
   - 事务自愈机制：事务异常（'E' 状态）无条件触发 `keep_alive = 0` 关闭并释放底层连接，杜绝脏连接回池。
 - 🚦 **统一错误模型**：
   - `PostgresStatus` 统一合并网络传输错误与数据库服务端 SQLSTATE 错误，通过 `status.ok()` 统一判断。
@@ -278,6 +278,16 @@ int main() {
     return 0;
 }
 ```
+
+#### 连接生命周期
+
+- `WFPostgresConnection` 将串行请求绑定到同一条可用连接。对象必须存活到所有任务完成。
+- 空闲连接断开后，若最后完成的响应为 `ReadyForQuery='I'`，下一次查询自动重新连接。
+- 事务（`'T'`/`'E'`）、COPY 或执行结果不确定的请求发生连接中断后，后续 SQL 不会在新会话上执行。此类失败后，需成功执行 `create_disconnect_task()` 才能重新使用连接。
+- 重连创建新的 PostgreSQL 会话，不恢复会话设置、临时表、预处理语句或 `LISTEN` 订阅。COPY 与通知等待请求依赖原会话；SQL 不会被自动重放。
+- `set_keep_alive()` 设置空闲保留时间，单位毫秒；池化任务默认 30 秒，固定连接默认 3600 秒。失败事务不受该设置影响，直接关闭连接。
+- `get_last_transaction_state()` 返回最后确认的服务端状态。`deinit()` 释放自行持有的 SSL 上下文；关闭连接应使用 `create_disconnect_task()`。
+
 
 ### 4. 异步 LISTEN / NOTIFY
 

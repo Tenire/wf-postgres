@@ -30,6 +30,7 @@ PostgresResponse::PostgresResponse(PostgresResponse&& other) noexcept
       backend_secret_key_(other.backend_secret_key_),
       backend_secret_data_(std::move(other.backend_secret_data_)),
       transaction_state_(other.transaction_state_),
+      ready_for_query_(other.ready_for_query_),
       parameters_(std::move(other.parameters_)),
       notifications_(std::move(other.notifications_)),
       notices_(std::move(other.notices_)),
@@ -47,6 +48,7 @@ PostgresResponse::PostgresResponse(PostgresResponse&& other) noexcept
     other.backend_pid_ = 0;
     other.backend_secret_key_ = 0;
     other.transaction_state_ = 'I';
+    other.ready_for_query_ = false;
     other.internal_error_ = 0;
 }
 
@@ -68,6 +70,7 @@ PostgresResponse& PostgresResponse::operator=(PostgresResponse&& other) noexcept
         backend_secret_key_ = other.backend_secret_key_;
         backend_secret_data_ = std::move(other.backend_secret_data_);
         transaction_state_ = other.transaction_state_;
+        ready_for_query_ = other.ready_for_query_;
         parameters_ = std::move(other.parameters_);
         notifications_ = std::move(other.notifications_);
         notices_ = std::move(other.notices_);
@@ -85,6 +88,7 @@ PostgresResponse& PostgresResponse::operator=(PostgresResponse&& other) noexcept
         other.backend_pid_ = 0;
         other.backend_secret_key_ = 0;
         other.transaction_state_ = 'I';
+        other.ready_for_query_ = false;
         other.internal_error_ = 0;
     }
     return *this;
@@ -149,6 +153,8 @@ int PostgresResponse::append(const void *buf, size_t *size)
         
         if (event.type == PG_EVENT_READY) {
             PostgresParser::parse_ready_for_query(event.payload, event.payload_size, &transaction_state_);
+            ready_for_query_ = event.payload_size == 1 &&
+                (transaction_state_ == 'I' || transaction_state_ == 'T' || transaction_state_ == 'E');
             finished = true;
             break;
         }

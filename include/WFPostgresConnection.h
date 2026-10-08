@@ -10,6 +10,8 @@
 
 namespace wfpg {
 
+namespace protocol { class ComplexPostgresTask; }
+
 class WFPostgresConnection
 {
 public:
@@ -71,6 +73,9 @@ public:
 
     void set_last_transaction_state(char state) { this->last_tx_state_ = state; }
     void set_ssl_ctx(WFPostgresTask *task) const;
+
+private:
+    friend class protocol::ComplexPostgresTask;
 
 protected:
     ParsedURI uri;
