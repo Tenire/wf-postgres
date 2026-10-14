@@ -82,7 +82,7 @@ Add directly into your `xmake.lua`:
 ```lua
 -- xmake.lua
 package("wf_postgres")
-    add_deps("workflow", "openssl")
+    add_deps("workflow", "openssl3")
     add_urls("https://github.com/tenire/wf-postgres.git")
     on_install("linux", "macosx", function (package)
         import("package.tools.xmake").install(package)
